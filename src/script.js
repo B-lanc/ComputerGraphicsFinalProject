@@ -3,6 +3,7 @@ const engine = new BABYLON.Engine(canvas, true);
 
 
 let score = 0;
+let highScore = 0;
 let speed = 0.1;
 let maxX = Math.PI/4;
 let minX = -Math.PI/3;
@@ -21,6 +22,9 @@ let enemyMinDistance = 80;
 let enemyMaxDistance = 115;
 let enemySize = 0.4;
 
+let state = 0;
+let globalTransition = false;
+
 const bullets = [];
 const bulletGoneArray = [];
 const enemies = [];
@@ -28,7 +32,7 @@ const enemyGoneArray = [];
 
 
 
-const createScene = ()=>{
+const main = ()=>{
 	const scene = new BABYLON.Scene(engine);
 	scene.collisionsEnabled = true;
 	scene.gravity = new BABYLON.Vector3(0, -9.8, 0);
@@ -67,6 +71,25 @@ const createScene = ()=>{
 	});
 	env.setMainColor(BABYLON.Color3.Gray());
 	
+
+	//GUI
+	const guiInGame = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UII");
+	guiInGame.idealHeight = 720;
+
+	const displayScore = new BABYLON.GUI.TextBlock();
+	displayScore.text = "Score : " + score;
+	displayScore.color = "black";
+	displayScore.fontSize = 40;
+	displayScore.top = "-300px";
+	guiInGame.addControl(displayScore);
+
+
+	//sound
+	//pewSound = new BABYLON.Sound("pew", "assets/pew.mp3", globalScene);
+	popSound = new BABYLON.Sound("pop", "assets/pop.mp3", globalScene);
+	deathMusic = new BABYLON.Sound("chopin", "assets/chopinBminor.mp3", globalScene);
+
+
 
 
 	const player = BABYLON.MeshBuilder.CreateBox("player", {}, scene);
@@ -155,6 +178,7 @@ const createScene = ()=>{
 		if(inputMap[" "] && bulletCD<=0 && bullets.length < bulletCount){
 			bullets.push(createBullet(player.position, player.rotation));
 			bulletCD = bulletTimeout;
+			//pewSound.play();
 		}
 		if(bulletCD > 0){
 			bulletCD -= 0.01;
@@ -173,13 +197,12 @@ const createScene = ()=>{
 			bullets.splice(bulletGoneArray[bulletGoneArray.length-1], 1);
 			bulletGoneArray.pop();
 		}
-		console.log(bullets.length);
 
 
 /*enemies*/
 		let randomValue = Math.random();
 		if(randomValue <= enemyRate){
-			enemies.push(createEnemy(player.position, enemyMat));
+			enemies.push(createEnemy(player, player.position, enemyMat));
 		}
 		enemies.forEach((enemy, index) => {
 			enemy.position.x += enemySpeed * (player.position.x - enemy.position.x);
@@ -192,11 +215,12 @@ const createScene = ()=>{
 		}
 
 
+		displayScore.text = "Score : " + score;
 		shaderMaterial.setFloat("time", time);
 		time += 0.01;
 	});
 
-	return scene;
+	globalScene = scene;
 }
 
 /*--------------------------------------------*/
@@ -210,13 +234,34 @@ const clamp = (target, min, max)=>{
 	}return target;
 }
 
-const createEnemy= (position, enemyMat) => {
-	const enemy = new BABYLON.MeshBuilder.CreateSphere("enemy", {}, scene);
+const createEnemy= (player, position, enemyMat) => {
+	const enemy = new BABYLON.MeshBuilder.CreateSphere("enemy", {}, globalScene);
 	enemy.position.x = position.x + Math.ceil((0.5 - Math.random())*(enemyMinDistance + (enemyMaxDistance-enemyMinDistance) * Math.random()));
 	enemy.position.y = 1 + Math.floor(Math.random() * 3);
 	enemy.position.z = position.z + Math.ceil((0.5 - Math.random())*(enemyMinDistance + (enemyMaxDistance-enemyMinDistance) * Math.random()));
 	enemy.diameter = enemySize;
 	enemy.material = enemyMat;
+
+	enemy.actionManager = new BABYLON.ActionManager(globalScene);
+	enemy.actionManager.registerAction(
+		new BABYLON.ExecuteCodeAction(
+			{
+				trigger : BABYLON.ActionManager.OnIntersectionEnterTrigger,
+				parameter : {
+					mesh : player
+				}
+			},
+			() => {
+				if(score > highScore){
+					highScore = score;
+				}
+				score = 0;
+				canvas.onclick = undefined;
+				goToStart();
+				deathMusic.play();
+			}
+		)
+	)
 
 /*	
 	bullets.forEach((bullet, index) => {
@@ -241,7 +286,7 @@ const createEnemy= (position, enemyMat) => {
 
 
 const createBullet = (position, rotation)=>{
-	const bullet = BABYLON.MeshBuilder.CreateBox("bullet", {}, scene);
+	const bullet = BABYLON.MeshBuilder.CreateBox("bullet", {}, globalScene);
 	bullet.scaling = new BABYLON.Vector3(0.1, 0.1, 0.1);
 	bullet.position.x = position.x;
 	bullet.position.y = position.y;
@@ -251,7 +296,7 @@ const createBullet = (position, rotation)=>{
 	bullet.rotation.z = rotation.z;
 	bullet.goneDistance = bulletDistance;
 
-	bullet.actionManager = new BABYLON.ActionManager(scene);
+	bullet.actionManager = new BABYLON.ActionManager(globalScene);
 	enemies.forEach((enemy, index) => {
 		bullet.actionManager.registerAction(
 			new BABYLON.ExecuteCodeAction(
@@ -264,12 +309,16 @@ const createBullet = (position, rotation)=>{
 				() => {
 					bullet.dispose();
 					enemyGoneArray.push(enemy);
+					enemyRate += 0.00003;
+					score += 100;
+					popSound.play();
 				}
 			)
 		);
 	})
 	return bullet;
 }
+
 
 //shader
 const createShaders = (scene)=>{
@@ -323,16 +372,117 @@ const createShaders = (scene)=>{
 	return shaderMaterial;
 }
 
+const goToStart = () => {
+	engine.displayLoadingUI();
+	globalScene.detachControl();
+	let scene = new BABYLON.Scene(engine);
+	scene.clearColor = new BABYLON.Color4(0, 0, 0, 1);
+	let camera = new BABYLON.FreeCamera("camera1", new BABYLON.Vector3(0, 0, 0), scene);
+	camera.setTarget(BABYLON.Vector3.Zero());
+
+	const guiMenu = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+	guiMenu.idealHeight = 720;
+
+	const displayMessage = new BABYLON.GUI.TextBlock();
+	displayMessage.text = "Use WASD to move, mouse to move camera, and space to shoot!"
+	displayMessage.color = "white";
+	displayMessage.fontSize = 20;
+	displayMessage.top = "250px";
+	guiMenu.addControl(displayMessage);
+
+	const displayHighScore = new BABYLON.GUI.TextBlock();
+	displayHighScore.text = "High score : " + highScore;
+	displayHighScore.color = "white";
+	displayHighScore.fontSize = 20;
+	displayHighScore.top = "100px";
+	guiMenu.addControl(displayHighScore);
+
+	const imageRect = new BABYLON.GUI.Rectangle("titleContainer");
+	imageRect.width = 0.8;
+	imageRect.thickness = 0;
+	guiMenu.addControl(imageRect);
+
+	const title = new BABYLON.GUI.TextBlock("title", "Paradox Kick");
+	title.resizetoFit = true;
+	title.fontFamily = "Ceviche One";
+	title.fontSize = "72px";
+	title.color = "white";
+	title.top = "-150px";
+	title.width = 0.8;
+	title.verticalAlighment = BABYLON.GUI.Control.VERTICAL_ALIGHMENT_TOP;
+	imageRect.addControl(title);
+
+
+	const startButton = BABYLON.GUI.Button.CreateSimpleButton("start", "PLAY");
+	startButton.width = 0.2;
+	startButton.height = "40px";
+	startButton.color = "white";
+	startButton.top = "-14px";
+	startButton.fontFamily = "viga";
+	imageRect.addControl(startButton);
+
+	BABYLON.Effect.RegisterShader("fade",
+		`
+		precision highp float; 
+		varying vec2 vUV;
+		uniform sampler2D textureSampler;
+		uniform float fadeLevel;
+		void main(void){
+			vec4 baseColor = texture2D(textureSampler, vUV) * fadeLevel;
+			baseColor.a = 1.0;
+			gl_FragColor = baseColor;
+		}
+		`);
+	let fadeLevel = 1.0;
+	globalTransition = false;
+	scene.registerBeforeRender( ()=> {
+		if (globalTransition) {
+			fadeLevel -= 0.05;
+			if(fadeLevel <=0){
+				main();
+				globalTransition = false;
+			}
+		}
+	})
+	startButton.onPointerDownObservable.add(() => {
+		const postProcess = new BABYLON.PostProcess("Fade", "fade", ["fadeLevel"], null, 1.0, camera);
+		postProcess.onApply = (effect) => {
+			effect.setFloat("fadeLevel", fadeLevel);
+		};
+		globalTransition = true;
+		
+		scene.detachControl();
+	});
+
+	scene.whenReadyAsync();
+	engine.hideLoadingUI();
+	globalScene.dispose();
+	globalScene = scene;
+	state = 1;
+}
+
+
+
+
+
+
+
 
 /*Functions End*/
 /*--------------------------------------------*/
 
 
-const scene = createScene();
+let globalScene = new BABYLON.Scene(engine);
+	//sound
+	//let pewSound = new BABYLON.Sound("pew", "assets/pew.mp3", globalScene);
+	let popSound = new BABYLON.Sound("pop", "assets/pop.mp3", globalScene);
+	let deathMusic = new BABYLON.Sound("chopin", "assets/chopinBminor.mp3", globalScene);
+goToStart();
 engine.runRenderLoop(()=>{
-	scene.render();
+	globalScene.render();
 });
 window.addEventListener("resize", ()=>{
 	engine.resize();
 });
+
 
